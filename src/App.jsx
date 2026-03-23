@@ -11,7 +11,13 @@ async function dbDelete(table, id, idCol="id") { await supabase.from(table).dele
 // ============================================================
 const CK = ["molde","corte","tecido","costura","estampas","transporte","insumo"];
 const CL = {molde:"Molde",corte:"Corte",tecido:"Tecido",costura:"Costura",estampas:"Estampas",transporte:"Transporte",insumo:"Insumo"};
-const DC = {molde:5,corte:8,tecido:25,costura:15,estampas:10,transporte:4,insumo:3};
+// FIXOS = valor total da produção (sistema divide por peça): molde, insumo, transporte
+// VARIÁVEIS = por peça: corte, costura, estampas
+// TECIDO = fórmula especial: (consumo_m × preco_metro × qty × fator_perda) + custo_extra
+const FIXOS = ["molde","insumo","transporte"];
+const VARIAVEIS = ["corte","costura","estampas"];
+const DC = {molde:80,corte:3,tecido:0,costura:15,estampas:10,transporte:200,insumo:300};
+const DC_TECIDO = {consumo:0.75,precoMetro:53,perdaPct:15,custoExtra:500};
 const SF = ["Orçamento","Aprovado","Em Produção","Finalizado","Entregue"];
 const SC = {"Orçamento":{bg:"rgba(76,126,201,0.12)",c:"#4c7ec9",b:"rgba(76,126,201,0.25)"},"Aprovado":{bg:"rgba(160,120,200,0.12)",c:"#a078c8",b:"rgba(160,120,200,0.25)"},"Em Produção":{bg:"rgba(224,145,69,0.12)",c:"#e09145",b:"rgba(224,145,69,0.25)"},"Finalizado":{bg:"rgba(76,201,138,0.12)",c:"#4cc98a",b:"rgba(76,201,138,0.25)"},"Entregue":{bg:"rgba(201,168,76,0.12)",c:"#c9a84c",b:"rgba(201,168,76,0.25)"}};
 const SS = ["pendente","andamento","concluído"];
@@ -71,6 +77,28 @@ function useApp(){return useContext(Ctx);}
 // UTILS & COMPONENTS
 // ============================================================
 const fmt=(v)=>(v||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
+// Calcula custo total do tecido: (consumo × precoMetro × qty × (1+perda/100)) + custoExtra
+function calcTecido(t, qty) {
+  if(!t) return 0;
+  return ((t.consumo||0) * (t.precoMetro||0) * (qty||0) * (1 + (t.perdaPct||0)/100)) + (t.custoExtra||0);
+}
+// Calcula custo TOTAL da produção (não por peça) dado costs, tecidoParams e qty
+function calcCustoTotal(costs, tecido, qty) {
+  let total = 0;
+  // Fixos (valor total já): molde, insumo, transporte
+  FIXOS.forEach(k => total += (costs?.[k]||0));
+  // Variáveis (por peça × qty): corte, costura, estampas
+  VARIAVEIS.forEach(k => total += (costs?.[k]||0) * qty);
+  // Tecido (fórmula)
+  total += calcTecido(tecido, qty);
+  return total;
+}
+// Custo por peça
+function custoPorPeca(costs, tecido, qty) {
+  if(!qty || qty <= 0) return 0;
+  return calcCustoTotal(costs, tecido, qty) / qty;
+}
+// Legacy sum for orders que já tem custos salvos no formato antigo (por peça)
 const sum=(c)=>CK.reduce((s,k)=>s+((c&&c[k])||0),0);
 const fD=(d)=>{if(!d)return"—";const s=String(d).split("T")[0].split("-");return`${s[2]}/${s[1]}/${s[0]}`;};
 const inp={width:"100%",background:$.s2,border:`1px solid ${$.bd}`,borderRadius:8,padding:"10px 14px",color:$.tx,fontFamily:"inherit",fontSize:14,outline:"none",marginBottom:14};
@@ -82,7 +110,52 @@ function KPI({label,value,sub,color}){return <Cd><div style={{fontSize:11,letter
 function Bt({children,onClick,v="gold",style:st}){const cs={gold:{bg:$.gdd,b:"rgba(201,168,76,0.25)",c:$.gd},blue:{bg:$.bld,b:"rgba(76,126,201,0.25)",c:$.bl},green:{bg:$.gnd,b:"rgba(76,201,138,0.25)",c:$.gn},muted:{bg:$.s2,b:$.bd,c:$.mu},red:{bg:$.rdd,b:"rgba(201,76,76,0.25)",c:$.rd}};const c=cs[v]||cs.gold;return <button onClick={onClick} style={{background:c.bg,border:`1px solid ${c.b}`,color:c.c,padding:"8px 16px",borderRadius:8,fontFamily:"inherit",fontSize:13,fontWeight:600,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:6,...st}}>{children}</button>;}
 function TB({tabs,active,onChange}){return <div style={{display:"flex",gap:4,background:$.sf,borderRadius:10,padding:4,border:`1px solid ${$.bd}`,marginBottom:20,flexWrap:"wrap"}}>{tabs.map(t=><button key={t} onClick={()=>onChange(t)} style={{padding:"8px 16px",borderRadius:8,fontSize:13,fontWeight:active===t?600:400,cursor:"pointer",color:active===t?$.tx:$.mu,background:active===t?$.s3:"transparent",border:"none",fontFamily:"inherit"}}>{t}</button>)}</div>;}
 function ImgUp({image,onChange,label="Mock-up"}){const hf=(e)=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=(ev)=>onChange(ev.target.result);r.readAsDataURL(f);};return <div style={{marginTop:12}}><div style={{fontSize:12,color:$.mu,marginBottom:8}}>{label}</div>{image?<div style={{position:"relative",display:"inline-block"}}><img src={image} alt="M" style={{maxWidth:"100%",maxHeight:180,borderRadius:10,border:`1px solid ${$.bd}`,objectFit:"contain",background:$.s2}}/><button onClick={()=>onChange(null)} style={{position:"absolute",top:4,right:4,width:22,height:22,borderRadius:6,background:"rgba(201,76,76,0.8)",border:"none",color:"#fff",fontSize:13,cursor:"pointer"}}>×</button></div>:<label style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"20px",border:`2px dashed ${$.bd}`,borderRadius:10,cursor:"pointer",background:$.s2,gap:6}}><span style={{fontSize:22}}>📷</span><span style={{fontSize:12,color:$.mu}}>Adicionar foto</span><input type="file" accept="image/*" onChange={hf} style={{display:"none"}}/></label>}</div>;}
-function CE({costs,onChange,qty,showT=true}){return <div>{CK.map(k=><div key={k} style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:7}}><span style={{fontSize:13,color:$.mu,minWidth:85}}>{CL[k]}</span><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:11,color:$.dm}}>R$</span><input type="number" value={(costs&&costs[k])||0} onChange={e=>onChange({...costs,[k]:Number(e.target.value)})} style={{width:65,background:$.s2,border:`1px solid ${$.bd}`,borderRadius:6,padding:"5px 8px",color:$.tx,fontFamily:"monospace",fontSize:13,textAlign:"right",outline:"none"}}/>{showT&&qty>0&&<span style={{fontFamily:"monospace",fontSize:11,color:$.dm,width:85,textAlign:"right"}}>{fmt(((costs&&costs[k])||0)*qty)}</span>}</div></div>)}</div>;}
+function CE({costs,onChange,qty,tecido,onTecidoChange,showT=true}){
+  const ni={width:65,background:$.s2,border:`1px solid ${$.bd}`,borderRadius:6,padding:"5px 8px",color:$.tx,fontFamily:"monospace",fontSize:13,textAlign:"right",outline:"none"};
+  const tecTotal=calcTecido(tecido,qty);
+  const lb=(t)=><div style={{fontSize:11,letterSpacing:1.5,textTransform:"uppercase",color:$.bl,fontWeight:600,marginTop:12,marginBottom:6,paddingTop:8,borderTop:`1px solid ${$.bd}`}}>{t}</div>;
+  return <div>
+    {lb("Custos Fixos (total da produção)")}
+    {FIXOS.map(k=><div key={k} style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:7}}>
+      <span style={{fontSize:13,color:$.mu,minWidth:85}}>{CL[k]}</span>
+      <div style={{display:"flex",alignItems:"center",gap:6}}>
+        <span style={{fontSize:10,color:$.dm}}>R$ total</span>
+        <input type="number" value={(costs&&costs[k])||0} onChange={e=>onChange({...costs,[k]:Number(e.target.value)})} style={ni}/>
+        {showT&&qty>0&&<span style={{fontFamily:"monospace",fontSize:11,color:$.dm,width:85,textAlign:"right"}}>{fmt(((costs&&costs[k])||0)/qty)}/pç</span>}
+      </div>
+    </div>)}
+
+    {lb("Tecido (fórmula)")}
+    <div style={{padding:10,background:$.s2,borderRadius:8,marginBottom:8}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+        <div><label style={{fontSize:10,color:$.mu}}>Consumo/peça (m)</label><input type="number" step="0.01" value={tecido?.consumo||0} onChange={e=>onTecidoChange({...tecido,consumo:Number(e.target.value)})} style={{...ni,width:"100%",marginTop:4}}/></div>
+        <div><label style={{fontSize:10,color:$.mu}}>Preço/metro (R$)</label><input type="number" step="0.01" value={tecido?.precoMetro||0} onChange={e=>onTecidoChange({...tecido,precoMetro:Number(e.target.value)})} style={{...ni,width:"100%",marginTop:4}}/></div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+        <div><label style={{fontSize:10,color:$.mu}}>Perda/desperdício (%)</label><input type="number" value={tecido?.perdaPct||0} onChange={e=>onTecidoChange({...tecido,perdaPct:Number(e.target.value)})} style={{...ni,width:"100%",marginTop:4}}/></div>
+        <div><label style={{fontSize:10,color:$.mu}}>Extra fixo (ribana, etc)</label><input type="number" value={tecido?.custoExtra||0} onChange={e=>onTecidoChange({...tecido,custoExtra:Number(e.target.value)})} style={{...ni,width:"100%",marginTop:4}}/></div>
+      </div>
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"6px 8px",background:$.sf,borderRadius:6}}>
+        <span style={{color:$.mu}}>Tecido Total</span>
+        <span style={{fontFamily:"monospace",fontWeight:600,color:$.gd}}>{fmt(tecTotal)}</span>
+      </div>
+      {qty>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginTop:4}}>
+        <span style={{color:$.dm}}>= ({tecido?.consumo||0}m × R${tecido?.precoMetro||0} × {qty} × {(1+(tecido?.perdaPct||0)/100).toFixed(2)}) + R${tecido?.custoExtra||0}</span>
+        <span style={{fontFamily:"monospace",color:$.dm}}>{fmt(tecTotal/qty)}/pç</span>
+      </div>}
+    </div>
+
+    {lb("Custos Variáveis (por peça)")}
+    {VARIAVEIS.map(k=><div key={k} style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:7}}>
+      <span style={{fontSize:13,color:$.mu,minWidth:85}}>{CL[k]}</span>
+      <div style={{display:"flex",alignItems:"center",gap:6}}>
+        <span style={{fontSize:10,color:$.dm}}>R$/pç</span>
+        <input type="number" value={(costs&&costs[k])||0} onChange={e=>onChange({...costs,[k]:Number(e.target.value)})} style={ni}/>
+        {showT&&qty>0&&<span style={{fontFamily:"monospace",fontSize:11,color:$.dm,width:85,textAlign:"right"}}>{fmt(((costs&&costs[k])||0)*qty)}</span>}
+      </div>
+    </div>)}
+  </div>;
+}
 function Toasts(){const{toasts}=useApp();return <div style={{position:"fixed",bottom:20,right:20,zIndex:999,display:"flex",flexDirection:"column",gap:8}}>{toasts.map(t=><div key={t.id} style={{background:$.s2,border:`1px solid ${$.bd}`,borderRadius:10,padding:"12px 20px",fontSize:13,color:$.tx,boxShadow:"0 8px 24px rgba(0,0,0,0.4)"}}>{t.msg}</div>)}</div>;}
 
 // ============================================================
@@ -91,16 +164,21 @@ function Toasts(){const{toasts}=useApp();return <div style={{position:"fixed",bo
 function Orcamento({nav}){
   const{products,addProduct,addOrder}=useApp();
   const[cl,setCl]=useState("");const[pid,setPid]=useState(products[0]?.id||1);const[qty,setQty]=useState(100);const[prazo,setPrazo]=useState("");
-  const[costs,setCosts]=useState({...DC});const[lP,setLP]=useState(25);const[iP,setIP]=useState(8);const[img,setImg]=useState(null);
+  const[costs,setCosts]=useState({molde:80,corte:3,costura:15,estampas:10,transporte:200,insumo:300});
+  const[tecido,setTecido]=useState({...DC_TECIDO});
+  const[lP,setLP]=useState(25);const[iP,setIP]=useState(8);const[img,setImg]=useState(null);
   const[showN,setShowN]=useState(false);const[nn,setNn]=useState("");const[nc,setNc]=useState("Camiseta");const[ppOv,setPpOv]=useState(null);
-  const prod=products.find(p=>p.id===pid);const cu=sum(costs);const ct=cu*qty;
+  const prod=products.find(p=>p.id===pid);
+  const ct=calcCustoTotal(costs,tecido,qty);const cu=qty>0?ct/qty:0;
   let fLP=lP,pf,pp;
   if(ppOv!==null){pp=ppOv;pf=pp*qty;const ci=ct*(1+iP/100);fLP=ct>0?((pf-ci)/ct)*100:0;}
   else{const lv=ct*(lP/100);const st=ct+lv;pf=st+st*(iP/100);pp=pf/(qty||1);fLP=lP;}
   const lv2=ct*(fLP/100);const iv2=(ct+lv2)*(iP/100);
-  const hSel=(id)=>{setPid(id);const p=products.find(x=>x.id===id);if(p?.costs)setCosts({...p.costs});setPpOv(null);};
-  const hNew=async()=>{if(!nn.trim())return;const nid=await addProduct({name:nn,price:pp,category:nc,emoji:"👕",costs:{...costs}});if(nid)setPid(nid);setShowN(false);setNn("");};
-  const hCreate=async()=>{if(!cl.trim())return;const half=Math.round(pf/2*100)/100;await addOrder({client:cl,productId:pid,product:prod?.name||nn,qty,total:pf,status:"Orçamento",date:new Date().toISOString().split("T")[0],prazo,costs:{...costs},custoReal:null,lucroP:Math.round(fLP*100)/100,impostoP:iP,mockImage:img,parcela1:{valor:half,data:"",pago:false},parcela2:{valor:Math.round((pf-half)*100)/100,data:"",pago:false}});nav("pedidos");};
+  const hSel=(id)=>{setPid(id);const p=products.find(x=>x.id===id);if(p?.costs)setCosts({...p.costs});if(p?.tecido)setTecido({...p.tecido});else setTecido({...DC_TECIDO});setPpOv(null);};
+  const hNew=async()=>{if(!nn.trim())return;const nid=await addProduct({name:nn,price:pp,category:nc,emoji:"👕",costs:{...costs},tecido:{...tecido}});if(nid)setPid(nid);setShowN(false);setNn("");};
+  // Salvar custos no formato que o resto do sistema entende (por peça pra cada categoria)
+  const costsForSave=()=>{const c={};FIXOS.forEach(k=>c[k]=qty>0?(costs[k]||0)/qty:0);VARIAVEIS.forEach(k=>c[k]=costs[k]||0);c.tecido=qty>0?calcTecido(tecido,qty)/qty:0;return c;};
+  const hCreate=async()=>{if(!cl.trim())return;const half=Math.round(pf/2*100)/100;await addOrder({client:cl,productId:pid,product:prod?.name||nn,qty,total:pf,status:"Orçamento",date:new Date().toISOString().split("T")[0],prazo,costs:costsForSave(),custoReal:null,lucroP:Math.round(fLP*100)/100,impostoP:iP,mockImage:img,parcela1:{valor:half,data:"",pago:false},parcela2:{valor:Math.round((pf-half)*100)/100,data:"",pago:false}});nav("pedidos");};
   return <div><h2 style={{fontSize:20,fontWeight:700,marginBottom:20}}>Novo Orçamento</h2><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
     <Cd>
       <div style={{fontSize:14,fontWeight:700,marginBottom:16}}>Dados</div>
@@ -110,7 +188,7 @@ function Orcamento({nav}){
       {showN&&<div style={{padding:12,background:$.s2,borderRadius:10,marginBottom:14,border:`1px solid ${$.bd}`}}><input value={nn} onChange={e=>setNn(e.target.value)} placeholder="Nome" style={{...inp,marginBottom:8}}/><select value={nc} onChange={e=>setNc(e.target.value)} style={{...inp,marginBottom:8}}>{["Camiseta","Moletom","Jaqueta","Acessório","Outro"].map(c=><option key={c}>{c}</option>)}</select><Bt v="green" onClick={hNew}>Cadastrar</Bt></div>}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><div><label style={{fontSize:12,color:$.mu}}>Quantidade</label><input type="number" value={qty} onChange={e=>setQty(Number(e.target.value))} style={inp}/></div><div><label style={{fontSize:12,color:$.mu}}>📅 Prazo</label><input type="date" value={prazo} onChange={e=>setPrazo(e.target.value)} style={inp}/></div></div>
       <ImgUp image={img} onChange={setImg} label="Mock-up (opcional)"/>
-      <div style={{borderTop:`1px solid ${$.bd}`,marginTop:16,paddingTop:16}}><div style={{fontSize:14,fontWeight:700,marginBottom:12}}>Custo por Peça</div><CE costs={costs} onChange={c=>{setCosts(c);setPpOv(null);}} qty={qty}/></div>
+      <div style={{borderTop:`1px solid ${$.bd}`,marginTop:16,paddingTop:16}}><div style={{fontSize:14,fontWeight:700,marginBottom:4}}>Custos da Produção</div><div style={{fontSize:11,color:$.dm,marginBottom:8}}>Fixos = total da produção | Variáveis = por peça | Tecido = fórmula</div><CE costs={costs} onChange={c=>{setCosts(c);setPpOv(null);}} qty={qty} tecido={tecido} onTecidoChange={t=>{setTecido(t);setPpOv(null);}}/></div>
       <div style={{borderTop:`1px solid ${$.bd}`,marginTop:12,paddingTop:12,display:"flex",gap:12}}>
         <div style={{flex:1}}><label style={{fontSize:11,color:$.mu}}>Lucro %</label><input type="number" value={Math.round(fLP*100)/100} onChange={e=>{setLP(Number(e.target.value));setPpOv(null);}} style={{...inp,fontFamily:"monospace",marginTop:4}}/></div>
         <div style={{flex:1}}><label style={{fontSize:11,color:$.mu}}>Imposto %</label><input type="number" value={iP} onChange={e=>{setIP(Number(e.target.value));setPpOv(null);}} style={{...inp,fontFamily:"monospace",marginTop:4}}/></div>
@@ -276,11 +354,15 @@ function Financeiro(){
 // PRODUTOS
 // ============================================================
 function ProdutosPage(){
-  const{products,updateProduct,addProduct,deleteProduct}=useApp();const[ed,setEd]=useState(null);const[sn,setSn]=useState(false);const[nn,setNn]=useState("");const[nc,setNc]=useState("Camiseta");const[ncs,setNcs]=useState({...DC});
-  const hAdd=async()=>{if(!nn.trim())return;await addProduct({name:nn,price:sum(ncs)*1.35,category:nc,emoji:"👕",costs:{...ncs}});setSn(false);setNn("");};
+  const{products,updateProduct,addProduct,deleteProduct}=useApp();const[ed,setEd]=useState(null);const[sn,setSn]=useState(false);const[nn,setNn]=useState("");const[nc,setNc]=useState("Camiseta");
+  const[ncs,setNcs]=useState({molde:80,corte:3,costura:15,estampas:10,transporte:200,insumo:300});
+  const[ntec,setNtec]=useState({...DC_TECIDO});
+  const hAdd=async()=>{if(!nn.trim())return;await addProduct({name:nn,price:0,category:nc,emoji:"👕",costs:{...ncs},tecido:{...ntec}});setSn(false);setNn("");};
   return <div><div style={{display:"flex",justifyContent:"space-between",marginBottom:20}}><h2 style={{fontSize:20,fontWeight:700}}>Produtos</h2><Bt onClick={()=>setSn(!sn)}>+ Novo</Bt></div>
-    {sn&&<Cd style={{marginBottom:20}}><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}><div><label style={{fontSize:12,color:$.mu}}>Nome</label><input value={nn} onChange={e=>setNn(e.target.value)} style={{...inp,marginTop:4}}/><label style={{fontSize:12,color:$.mu}}>Categoria</label><select value={nc} onChange={e=>setNc(e.target.value)} style={{...inp,marginTop:4}}>{["Camiseta","Moletom","Jaqueta","Acessório","Outro"].map(c=><option key={c}>{c}</option>)}</select></div><div><div style={{fontSize:12,color:$.mu,marginBottom:8}}>Custos/Pç</div><CE costs={ncs} onChange={setNcs} qty={0} showT={false}/></div></div><Bt v="green" onClick={hAdd} style={{marginTop:12}}>Cadastrar</Bt></Cd>}
-    <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16}}>{products.map(p=>{const isEd=ed===p.id;return <Cd key={p.id} hover onClick={()=>!isEd&&setEd(p.id)} style={{cursor:"pointer"}}><div style={{fontSize:32,marginBottom:10}}>{p.emoji}</div>{isEd?<div onClick={e=>e.stopPropagation()}><input value={p.name} onChange={e=>updateProduct(p.id,{name:e.target.value})} style={{width:"100%",background:$.s2,border:`1px solid ${$.bd}`,borderRadius:6,padding:"7px 8px",color:$.tx,fontFamily:"inherit",fontSize:14,fontWeight:700,outline:"none",marginBottom:8}}/><CE costs={p.costs||DC} onChange={c=>updateProduct(p.id,{costs:c,price:sum(c)*1.35})} qty={0} showT={false}/><div style={{marginTop:8,display:"flex",gap:6}}><Bt v="green" onClick={()=>setEd(null)} style={{fontSize:12}}>✓</Bt><Bt v="red" onClick={async()=>{if(confirm(`Remover "${p.name}"?`)){await deleteProduct(p.id);setEd(null);}}} style={{fontSize:12}}>🗑</Bt></div></div>:<><div style={{fontWeight:700,fontSize:16,marginBottom:4}}>{p.name}</div><div style={{fontSize:12,color:$.mu,marginBottom:8}}>{p.category}</div><div style={{fontFamily:"monospace",fontSize:17,color:$.gd,fontWeight:700}}>{fmt(p.price)}</div><div style={{fontSize:11,color:$.dm,marginTop:6}}>Clique p/ editar</div></>}</Cd>;})}</div>
+    {sn&&<Cd style={{marginBottom:20}}><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}><div><label style={{fontSize:12,color:$.mu}}>Nome</label><input value={nn} onChange={e=>setNn(e.target.value)} style={{...inp,marginTop:4}}/><label style={{fontSize:12,color:$.mu}}>Categoria</label><select value={nc} onChange={e=>setNc(e.target.value)} style={{...inp,marginTop:4}}>{["Camiseta","Moletom","Jaqueta","Acessório","Outro"].map(c=><option key={c}>{c}</option>)}</select></div><div><div style={{fontSize:12,color:$.mu,marginBottom:8}}>Custos Base</div><CE costs={ncs} onChange={setNcs} qty={0} tecido={ntec} onTecidoChange={setNtec} showT={false}/></div></div><Bt v="green" onClick={hAdd} style={{marginTop:12}}>Cadastrar</Bt></Cd>}
+    <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16}}>{products.map(p=>{const isEd=ed===p.id;return <Cd key={p.id} hover onClick={()=>!isEd&&setEd(p.id)} style={{cursor:"pointer"}}><div style={{fontSize:32,marginBottom:10}}>{p.emoji}</div>{isEd?<div onClick={e=>e.stopPropagation()}><input value={p.name} onChange={e=>updateProduct(p.id,{name:e.target.value})} style={{width:"100%",background:$.s2,border:`1px solid ${$.bd}`,borderRadius:6,padding:"7px 8px",color:$.tx,fontFamily:"inherit",fontSize:14,fontWeight:700,outline:"none",marginBottom:8}}/>
+      <CE costs={p.costs||{molde:80,corte:3,costura:15,estampas:10,transporte:200,insumo:300}} onChange={c=>updateProduct(p.id,{costs:c})} qty={0} tecido={p.tecido||DC_TECIDO} onTecidoChange={t=>updateProduct(p.id,{tecido:t})} showT={false}/>
+      <div style={{marginTop:8,display:"flex",gap:6}}><Bt v="green" onClick={()=>setEd(null)} style={{fontSize:12}}>✓</Bt><Bt v="red" onClick={async()=>{if(confirm(`Remover "${p.name}"?`)){await deleteProduct(p.id);setEd(null);}}} style={{fontSize:12}}>🗑</Bt></div></div>:<><div style={{fontWeight:700,fontSize:16,marginBottom:4}}>{p.name}</div><div style={{fontSize:12,color:$.mu,marginBottom:8}}>{p.category}</div><div style={{fontSize:11,color:$.dm,marginTop:6}}>Clique p/ editar custos</div></>}</Cd>;})}</div>
   </div>;
 }
 
