@@ -17,7 +17,7 @@ const CL = {molde:"Molde",corte:"Corte",tecido:"Tecido",costura:"Costura",estamp
 const FIXOS = ["molde","insumo","transporte"];
 const VARIAVEIS = ["corte","costura","estampas"];
 const DC = {molde:80,corte:3,tecido:0,costura:15,estampas:10,transporte:200,insumo:300};
-const DC_TECIDO = {consumo:0.75,precoMetro:53,perdaPct:15,custoExtra:500};
+const DC_TECIDO = {consumo:0.75,precoMetro:53,perdaPct:15,custoExtra:500,unit:"kg",disabled:{}};
 const SF = ["Orçamento","Aprovado","Em Produção","Finalizado","Entregue"];
 const SC = {"Orçamento":{bg:"rgba(76,126,201,0.12)",c:"#4c7ec9",b:"rgba(76,126,201,0.25)"},"Aprovado":{bg:"rgba(160,120,200,0.12)",c:"#a078c8",b:"rgba(160,120,200,0.25)"},"Em Produção":{bg:"rgba(224,145,69,0.12)",c:"#e09145",b:"rgba(224,145,69,0.25)"},"Finalizado":{bg:"rgba(76,201,138,0.12)",c:"#4cc98a",b:"rgba(76,201,138,0.25)"},"Entregue":{bg:"rgba(201,168,76,0.12)",c:"#c9a84c",b:"rgba(201,168,76,0.25)"}};
 const SS = ["pendente","andamento","concluído"];
@@ -77,10 +77,15 @@ function useApp(){return useContext(Ctx);}
 // UTILS & COMPONENTS
 // ============================================================
 const fmt=(v)=>(v||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
-// Calcula custo total do tecido: (consumo × precoMetro × qty × (1+perda/100)) + custoExtra
+// Calcula custo total do tecido respeitando campos desabilitados
 function calcTecido(t, qty) {
   if(!t) return 0;
-  return ((t.consumo||0) * (t.precoMetro||0) * (qty||0) * (1 + (t.perdaPct||0)/100)) + (t.custoExtra||0);
+  const off = t.disabled || {};
+  const consumo = off.consumo ? 0 : (t.consumo||0);
+  const preco = off.preco ? 0 : (t.precoMetro||0);
+  const perda = off.perda ? 0 : (t.perdaPct||0);
+  const extra = off.extra ? 0 : (t.custoExtra||0);
+  return (consumo * preco * (qty||0) * (1 + perda/100)) + extra;
 }
 // Calcula custo TOTAL da produção (não por peça) dado costs, tecidoParams e qty
 function calcCustoTotal(costs, tecido, qty) {
@@ -114,33 +119,37 @@ function CE({costs,onChange,qty,tecido,onTecidoChange,showT=true}){
   const ni={width:65,background:$.s2,border:`1px solid ${$.bd}`,borderRadius:6,padding:"5px 8px",color:$.tx,fontFamily:"monospace",fontSize:13,textAlign:"right",outline:"none"};
   const tecTotal=calcTecido(tecido,qty);
   const lb=(t)=><div style={{fontSize:11,letterSpacing:1.5,textTransform:"uppercase",color:$.bl,fontWeight:600,marginTop:12,marginBottom:6,paddingTop:8,borderTop:`1px solid ${$.bd}`}}>{t}</div>;
-  return <div>
-    {lb("Custos Fixos (total da produção)")}
-    {FIXOS.map(k=><div key={k} style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:7}}>
-      <span style={{fontSize:13,color:$.mu,minWidth:85}}>{CL[k]}</span>
-      <div style={{display:"flex",alignItems:"center",gap:6}}>
-        <span style={{fontSize:10,color:$.dm}}>R$ total</span>
-        <input type="number" value={(costs&&costs[k])||0} onChange={e=>onChange({...costs,[k]:Number(e.target.value)})} style={ni}/>
-        {showT&&qty>0&&<span style={{fontFamily:"monospace",fontSize:11,color:$.dm,width:85,textAlign:"right"}}>{fmt(((costs&&costs[k])||0)/qty)}/pç</span>}
-      </div>
-    </div>)}
+  const unit=tecido?.unit||"kg";
+  const tog=(field)=>{const cur=tecido?.disabled||{};onTecidoChange({...tecido,disabled:{...cur,[field]:!cur[field]}});};
+  const isOff=(field)=>tecido?.disabled?.[field];
+  const chk=(field,label,children)=><div style={{opacity:isOff(field)?0.35:1,marginBottom:8}}>
+    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+      <input type="checkbox" checked={!isOff(field)} onChange={()=>tog(field)} style={{accentColor:$.bl,cursor:"pointer"}}/>
+      <label style={{fontSize:10,color:$.mu,cursor:"pointer"}} onClick={()=>tog(field)}>{label}</label>
+    </div>
+    {!isOff(field)&&children}
+  </div>;
 
-    {lb("Tecido (fórmula)")}
+  return <div>
+    {lb("🧵 Tecido (fórmula)")}
     <div style={{padding:10,background:$.s2,borderRadius:8,marginBottom:8}}>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-        <div><label style={{fontSize:10,color:$.mu}}>Consumo/peça (m)</label><input type="number" step="0.01" value={tecido?.consumo||0} onChange={e=>onTecidoChange({...tecido,consumo:Number(e.target.value)})} style={{...ni,width:"100%",marginTop:4}}/></div>
-        <div><label style={{fontSize:10,color:$.mu}}>Preço/metro (R$)</label><input type="number" step="0.01" value={tecido?.precoMetro||0} onChange={e=>onTecidoChange({...tecido,precoMetro:Number(e.target.value)})} style={{...ni,width:"100%",marginTop:4}}/></div>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+        <span style={{fontSize:11,color:$.mu}}>Unidade:</span>
+        <button onClick={()=>onTecidoChange({...tecido,unit:"kg"})} style={{padding:"3px 10px",borderRadius:6,fontSize:11,fontWeight:600,cursor:"pointer",border:`1px solid ${unit==="kg"?$.bl:$.bd}`,background:unit==="kg"?$.bld:"transparent",color:unit==="kg"?$.bl:$.dm,fontFamily:"inherit"}}>kg</button>
+        <button onClick={()=>onTecidoChange({...tecido,unit:"m"})} style={{padding:"3px 10px",borderRadius:6,fontSize:11,fontWeight:600,cursor:"pointer",border:`1px solid ${unit==="m"?$.bl:$.bd}`,background:unit==="m"?$.bld:"transparent",color:unit==="m"?$.bl:$.dm,fontFamily:"inherit"}}>metro</button>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-        <div><label style={{fontSize:10,color:$.mu}}>Perda/desperdício (%)</label><input type="number" value={tecido?.perdaPct||0} onChange={e=>onTecidoChange({...tecido,perdaPct:Number(e.target.value)})} style={{...ni,width:"100%",marginTop:4}}/></div>
-        <div><label style={{fontSize:10,color:$.mu}}>Extra fixo (ribana, etc)</label><input type="number" value={tecido?.custoExtra||0} onChange={e=>onTecidoChange({...tecido,custoExtra:Number(e.target.value)})} style={{...ni,width:"100%",marginTop:4}}/></div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        {chk("preco",`Preço/${unit} (R$)`,<input type="number" step="0.01" value={tecido?.precoMetro||0} onChange={e=>onTecidoChange({...tecido,precoMetro:Number(e.target.value)})} style={{...ni,width:"100%"}}/>)}
+        {chk("consumo",`Consumo/peça (${unit})`,<input type="number" step="0.01" value={tecido?.consumo||0} onChange={e=>onTecidoChange({...tecido,consumo:Number(e.target.value)})} style={{...ni,width:"100%"}}/>)}
+        {chk("perda","Perda/desperdício (%)",<input type="number" value={tecido?.perdaPct||0} onChange={e=>onTecidoChange({...tecido,perdaPct:Number(e.target.value)})} style={{...ni,width:"100%"}}/>)}
+        {chk("extra","Extra fixo (ribana, etc)",<input type="number" value={tecido?.custoExtra||0} onChange={e=>onTecidoChange({...tecido,custoExtra:Number(e.target.value)})} style={{...ni,width:"100%"}}/>)}
       </div>
-      <div style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"6px 8px",background:$.sf,borderRadius:6}}>
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"6px 8px",background:$.sf,borderRadius:6,marginTop:8}}>
         <span style={{color:$.mu}}>Tecido Total</span>
         <span style={{fontFamily:"monospace",fontWeight:600,color:$.gd}}>{fmt(tecTotal)}</span>
       </div>
-      {qty>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginTop:4}}>
-        <span style={{color:$.dm}}>= ({tecido?.consumo||0}m × R${tecido?.precoMetro||0} × {qty} × {(1+(tecido?.perdaPct||0)/100).toFixed(2)}) + R${tecido?.custoExtra||0}</span>
+      {qty>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:10,marginTop:4}}>
+        <span style={{color:$.dm}}>= ({!isOff("consumo")?(tecido?.consumo||0):0}{unit} × R${!isOff("preco")?(tecido?.precoMetro||0):0} × {qty}{!isOff("perda")?` × ${(1+(tecido?.perdaPct||0)/100).toFixed(2)}`:""}) {!isOff("extra")?`+ R$${tecido?.custoExtra||0}`:""}</span>
         <span style={{fontFamily:"monospace",color:$.dm}}>{fmt(tecTotal/qty)}/pç</span>
       </div>}
     </div>
@@ -152,6 +161,16 @@ function CE({costs,onChange,qty,tecido,onTecidoChange,showT=true}){
         <span style={{fontSize:10,color:$.dm}}>R$/pç</span>
         <input type="number" value={(costs&&costs[k])||0} onChange={e=>onChange({...costs,[k]:Number(e.target.value)})} style={ni}/>
         {showT&&qty>0&&<span style={{fontFamily:"monospace",fontSize:11,color:$.dm,width:85,textAlign:"right"}}>{fmt(((costs&&costs[k])||0)*qty)}</span>}
+      </div>
+    </div>)}
+
+    {lb("Custos Fixos (total da produção)")}
+    {FIXOS.map(k=><div key={k} style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:7}}>
+      <span style={{fontSize:13,color:$.mu,minWidth:85}}>{CL[k]}</span>
+      <div style={{display:"flex",alignItems:"center",gap:6}}>
+        <span style={{fontSize:10,color:$.dm}}>R$ total</span>
+        <input type="number" value={(costs&&costs[k])||0} onChange={e=>onChange({...costs,[k]:Number(e.target.value)})} style={ni}/>
+        {showT&&qty>0&&<span style={{fontFamily:"monospace",fontSize:11,color:$.dm,width:85,textAlign:"right"}}>{fmt(((costs&&costs[k])||0)/qty)}/pç</span>}
       </div>
     </div>)}
   </div>;
