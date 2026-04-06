@@ -29,7 +29,7 @@ const $ = {bg:"#0c0c0f",sf:"#14141a",s2:"#1a1a22",s3:"#22222c",bd:"rgba(255,255,
 // ============================================================
 const Ctx = createContext(null);
 
-function mapOrder(x){return{...x,productId:x.product_id,product:x.product_name,custoReal:x.custo_real,lucroP:x.lucro_p,impostoP:x.imposto_p,mockImage:x.mock_image,costs:x.costs||DC,costsDetail:x.costs_detail||null,parcela1:x.parcela1||{valor:0,data:"",pago:false},parcela2:x.parcela2||{valor:0,data:"",pago:false}};}
+function mapOrder(x){return{...x,productId:x.product_id,product:x.product_name,custoReal:x.custo_real,lucroP:x.lucro_p,impostoP:x.imposto_p,mockImage:x.mock_image,costs:x.costs||DC,costsDetail:x.costs_detail||null,skus:x.skus||null,nomePedido:x.nome_pedido||null,parcela1:x.parcela1||{valor:0,data:"",pago:false},parcela2:x.parcela2||{valor:0,data:"",pago:false}};}
 function mapPO(x){return{...x,pedidoId:x.pedido_id,custosReais:x.custos_reais||DC,ficha:x.ficha||{},enfesto:x.enfesto||"",totalCortado:x.total_cortado||"",totalSilkado:x.total_silkado||"",totalCosturado:x.total_costurado||""};}
 function mapLead(x){return{...x,ultimoContato:x.ultimo_contato,fup:x.fup||"",temperatura:x.temperatura||"frio"};}
 
@@ -46,7 +46,7 @@ function Provider({children}) {
   const updateProduct=useCallback(async(id,u)=>{const b={...u};if(b.tecido!==undefined)b.tecido=b.tecido;await dbUpdate("products",id,b);setProducts(pr=>pr.map(p=>p.id===id?{...p,...u}:p));},[]);
   const deleteProduct=useCallback(async(id)=>{await dbDelete("products",id);setProducts(pr=>pr.filter(p=>p.id!==id));toast("Removido");},[toast]);
 
-  const addOrder=useCallback(async(o)=>{const body={client:o.client,product_id:o.productId,product_name:o.product,qty:o.qty,total:o.total,status:o.status,date:o.date,prazo:o.prazo||null,costs:o.costs,costs_detail:o.costsDetail||null,lucro_p:o.lucroP,imposto_p:o.impostoP,mock_image:o.mockImage,parcela1:o.parcela1,parcela2:o.parcela2};const r=await dbInsert("orders",body);if(r){setOrders(os=>[mapOrder(r),...os]);toast(`#${r.id} criado!`);return r.id;}},[toast]);
+  const addOrder=useCallback(async(o)=>{const body={client:o.client,product_id:o.productId,product_name:o.product,qty:o.qty,total:o.total,status:o.status,date:o.date,prazo:o.prazo||null,costs:o.costs,costs_detail:o.costsDetail||null,lucro_p:o.lucroP,imposto_p:o.impostoP,mock_image:o.mockImage,parcela1:o.parcela1,parcela2:o.parcela2,skus:o.costsDetail?.skus||null,nome_pedido:o.costsDetail?.nomePedido||null};const r=await dbInsert("orders",body);if(r){setOrders(os=>[mapOrder(r),...os]);toast(`#${r.id} criado!`);return r.id;}},[toast]);
   const updateOrder=useCallback(async(id,u)=>{const b={};if(u.client!==undefined)b.client=u.client;if(u.product!==undefined)b.product_name=u.product;if(u.qty!==undefined)b.qty=u.qty;if(u.total!==undefined)b.total=u.total;if(u.status!==undefined)b.status=u.status;if(u.prazo!==undefined)b.prazo=u.prazo||null;if(u.custoReal!==undefined)b.custo_real=u.custoReal;if(u.mockImage!==undefined)b.mock_image=u.mockImage;if(u.parcela1!==undefined)b.parcela1=u.parcela1;if(u.parcela2!==undefined)b.parcela2=u.parcela2;if(u.costs!==undefined)b.costs=u.costs;if(u.costsDetail!==undefined)b.costs_detail=u.costsDetail;await dbUpdate("orders",id,b);setOrders(os=>os.map(o=>o.id===id?{...o,...u}:o));},[]);
   const deleteOrder=useCallback(async(id)=>{await dbDelete("production_orders",id,"pedido_id");await dbDelete("orders",id);setOrders(os=>os.filter(o=>o.id!==id));setPOs(p=>p.filter(x=>x.pedidoId!==id));toast(`#${id} deletado`);},[toast]);
 
@@ -182,48 +182,92 @@ function Toasts(){const{toasts}=useApp();return <div style={{position:"fixed",bo
 // ============================================================
 function Orcamento({nav}){
   const{products,addProduct,addOrder}=useApp();
-  const[cl,setCl]=useState("");const[pid,setPid]=useState(products[0]?.id||1);const[qty,setQty]=useState(100);const[prazo,setPrazo]=useState("");
-  const[costs,setCosts]=useState({molde:80,corte:3,costura:15,estampas:10,transporte:200,insumo:300});
-  const[tecido,setTecido]=useState({...DC_TECIDO});
-  const[lP,setLP]=useState(25);const[iP,setIP]=useState(8);const[img,setImg]=useState(null);
-  const[showN,setShowN]=useState(false);const[nn,setNn]=useState("");const[nc,setNc]=useState("Camiseta");const[ppOv,setPpOv]=useState(null);
-  const prod=products.find(p=>p.id===pid);
-  const ct=calcCustoTotal(costs,tecido,qty);const cu=qty>0?ct/qty:0;
-  let fLP=lP,pf,pp;
-  if(ppOv!==null){pp=ppOv;pf=pp*qty;const ci=ct*(1+iP/100);fLP=ct>0?((pf-ci)/ct)*100:0;}
-  else{const lv=ct*(lP/100);const st=ct+lv;pf=st+st*(iP/100);pp=pf/(qty||1);fLP=lP;}
-  const lv2=ct*(fLP/100);const iv2=(ct+lv2)*(iP/100);
-  const hSel=(id)=>{setPid(id);const p=products.find(x=>x.id===id);if(p?.costs)setCosts({...p.costs});if(p?.tecido)setTecido({...p.tecido});else setTecido({...DC_TECIDO});setPpOv(null);};
-  const hNew=async()=>{if(!nn.trim())return;const nid=await addProduct({name:nn,price:pp,category:nc,emoji:"👕",costs:{...costs},tecido:{...tecido}});if(nid)setPid(nid);setShowN(false);setNn("");};
-  // Salvar custos no formato que o resto do sistema entende (por peça pra cada categoria)
-  const costsForSave=()=>{const c={};FIXOS.forEach(k=>c[k]=qty>0?(costs[k]||0)/qty:0);VARIAVEIS.forEach(k=>c[k]=costs[k]||0);c.tecido=qty>0?calcTecido(tecido,qty)/qty:0;return c;};
-  const costsDetailForSave=()=>{const d={};FIXOS.forEach(k=>d[k]=costs[k]||0);VARIAVEIS.forEach(k=>d[k]=(costs[k]||0)*qty);d.tecido=calcTecido(tecido,qty);d.total=ct;return d;};
-  const hCreate=async()=>{if(!cl.trim())return;const half=Math.round(pf/2*100)/100;await addOrder({client:cl,productId:pid,product:prod?.name||nn,qty,total:pf,status:"Orçamento",date:new Date().toISOString().split("T")[0],prazo,costs:costsForSave(),costsDetail:costsDetailForSave(),custoReal:null,lucroP:Math.round(fLP*100)/100,impostoP:iP,mockImage:img,parcela1:{valor:half,data:"",pago:false},parcela2:{valor:Math.round((pf-half)*100)/100,data:"",pago:false}});nav("pedidos");};
-  return <div><h2 style={{fontSize:20,fontWeight:700,marginBottom:20}}>Novo Orçamento</h2><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
-    <Cd>
-      <div style={{fontSize:14,fontWeight:700,marginBottom:16}}>Dados</div>
-      <label style={{fontSize:12,color:$.mu}}>Cliente</label><input value={cl} onChange={e=>setCl(e.target.value)} placeholder="Nome" style={inp}/>
-      <label style={{fontSize:12,color:$.mu}}>Produto</label><select value={pid} onChange={e=>hSel(Number(e.target.value))} style={inp}>{products.map(p=><option key={p.id} value={p.id}>{p.emoji} {p.name}</option>)}</select>
-      <Bt v="blue" onClick={()=>setShowN(!showN)} style={{marginBottom:14,fontSize:12}}>+ Novo Produto</Bt>
-      {showN&&<div style={{padding:12,background:$.s2,borderRadius:10,marginBottom:14,border:`1px solid ${$.bd}`}}><input value={nn} onChange={e=>setNn(e.target.value)} placeholder="Nome" style={{...inp,marginBottom:8}}/><select value={nc} onChange={e=>setNc(e.target.value)} style={{...inp,marginBottom:8}}>{["Camiseta","Moletom","Jaqueta","Acessório","Outro"].map(c=><option key={c}>{c}</option>)}</select><Bt v="green" onClick={hNew}>Cadastrar</Bt></div>}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><div><label style={{fontSize:12,color:$.mu}}>Quantidade</label><input type="number" value={qty} onChange={e=>setQty(Number(e.target.value))} style={inp}/></div><div><label style={{fontSize:12,color:$.mu}}>📅 Prazo</label><input type="date" value={prazo} onChange={e=>setPrazo(e.target.value)} style={inp}/></div></div>
-      <ImgUp image={img} onChange={setImg} label="Mock-up (opcional)"/>
-      <div style={{borderTop:`1px solid ${$.bd}`,marginTop:16,paddingTop:16}}><div style={{fontSize:14,fontWeight:700,marginBottom:4}}>Custos da Produção</div><div style={{fontSize:11,color:$.dm,marginBottom:8}}>Fixos = total da produção | Variáveis = por peça | Tecido = fórmula</div><CE costs={costs} onChange={c=>{setCosts(c);setPpOv(null);}} qty={qty} tecido={tecido} onTecidoChange={t=>{setTecido(t);setPpOv(null);}}/></div>
-      <div style={{borderTop:`1px solid ${$.bd}`,marginTop:12,paddingTop:12,display:"flex",gap:12}}>
-        <div style={{flex:1}}><label style={{fontSize:11,color:$.mu}}>Lucro %</label><input type="number" value={Math.round(fLP*100)/100} onChange={e=>{setLP(Number(e.target.value));setPpOv(null);}} style={{...inp,fontFamily:"monospace",marginTop:4}}/></div>
-        <div style={{flex:1}}><label style={{fontSize:11,color:$.mu}}>Imposto %</label><input type="number" value={iP} onChange={e=>{setIP(Number(e.target.value));setPpOv(null);}} style={{...inp,fontFamily:"monospace",marginTop:4}}/></div>
+  const[nomePedido,setNomePedido]=useState("");const[cl,setCl]=useState("");const[prazo,setPrazo]=useState("");
+  const emptySku=()=>({id:Date.now(),pid:products[0]?.id||1,qty:100,costs:{molde:80,corte:3,costura:15,estampas:10,transporte:200,insumo:300},tecido:{...DC_TECIDO},lP:25,iP:8,ppOv:null,desc:"",img:null});
+  const[skus,setSkus]=useState([emptySku()]);
+  const[activeSku,setActiveSku]=useState(0);
+
+  const updSku=(i,u)=>setSkus(s=>s.map((sk,j)=>j===i?{...sk,...u}:sk));
+  const addSku=()=>{setSkus(s=>[...s,emptySku()]);setActiveSku(skus.length);};
+  const rmSku=(i)=>{if(skus.length<=1)return;const ns=skus.filter((_,j)=>j!==i);setSkus(ns);if(activeSku>=ns.length)setActiveSku(ns.length-1);};
+
+  const calcSku=(sk)=>{
+    const prod=products.find(p=>p.id===sk.pid);
+    const ct=calcCustoTotal(sk.costs,sk.tecido,sk.qty);const cu=sk.qty>0?ct/sk.qty:0;
+    let fLP=sk.lP,pf,pp;
+    if(sk.ppOv!==null){pp=sk.ppOv;pf=pp*sk.qty;const ci=ct*(1+sk.iP/100);fLP=ct>0?((pf-ci)/ct)*100:0;}
+    else{const lv=ct*(sk.lP/100);const st=ct+lv;pf=st+st*(sk.iP/100);pp=pf/(sk.qty||1);fLP=sk.lP;}
+    const lv2=ct*(fLP/100);const iv2=(ct+lv2)*(sk.iP/100);
+    return{prod,ct,cu,fLP,pf,pp,lv2,iv2,lucLiq:lv2-iv2};
+  };
+
+  const skuCalcs=skus.map(calcSku);
+  const totalGeral=skuCalcs.reduce((s,c)=>s+c.pf,0);
+  const totalCusto=skuCalcs.reduce((s,c)=>s+c.ct,0);
+  const totalLucLiq=skuCalcs.reduce((s,c)=>s+c.lucLiq,0);
+  const totalQty=skus.reduce((s,sk)=>s+sk.qty,0);
+
+  const hSelProd=(i,id)=>{const p=products.find(x=>x.id===id);updSku(i,{pid:id,costs:p?.costs?{...p.costs}:{molde:80,corte:3,costura:15,estampas:10,transporte:200,insumo:300},tecido:p?.tecido?{...p.tecido}:{...DC_TECIDO},ppOv:null});};
+
+  const hCreate=async()=>{
+    if(!cl.trim())return;
+    const skusData=skus.map((sk,i)=>{const c=skuCalcs[i];const costsPerPc={};FIXOS.forEach(k=>costsPerPc[k]=sk.qty>0?(sk.costs[k]||0)/sk.qty:0);VARIAVEIS.forEach(k=>costsPerPc[k]=sk.costs[k]||0);costsPerPc.tecido=sk.qty>0?calcTecido(sk.tecido,sk.qty)/sk.qty:0;
+      return{product:c.prod?.name||"Produto",desc:sk.desc,qty:sk.qty,costs:costsPerPc,tecido:sk.tecido,costsTotais:{molde:sk.costs.molde,corte:sk.costs.corte*sk.qty,tecido:calcTecido(sk.tecido,sk.qty),costura:sk.costs.costura*sk.qty,estampas:sk.costs.estampas*sk.qty,transporte:sk.costs.transporte,insumo:sk.costs.insumo},custoTotal:c.ct,lucroP:Math.round(c.fLP*100)/100,impostoP:sk.iP,total:c.pf,pp:Math.round(c.pp*100)/100,lucBruto:c.lv2,imposto:c.iv2,lucLiq:c.lucLiq};
+    });
+    const mainSku=skusData[0];const half=Math.round(totalGeral/2*100)/100;
+    await addOrder({client:cl,productId:skus[0].pid,product:nomePedido||skusData.map(s=>s.product).join(" + "),qty:totalQty,total:totalGeral,status:"Orçamento",date:new Date().toISOString().split("T")[0],prazo,costs:mainSku.costs,costsDetail:{skus:skusData,nomePedido:nomePedido||cl},custoReal:null,lucroP:mainSku.lucroP,impostoP:mainSku.impostoP,mockImage:skus[0].img,parcela1:{valor:half,data:"",pago:false},parcela2:{valor:Math.round((totalGeral-half)*100)/100,data:"",pago:false}});
+    nav("pedidos");
+  };
+
+  const sk=skus[activeSku];const c=skuCalcs[activeSku];if(!sk||!c)return null;
+
+  return <div><h2 style={{fontSize:20,fontWeight:700,marginBottom:20}}>Novo Orçamento</h2>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:20}}>
+      <div><label style={{fontSize:12,color:$.mu}}>Nome do Pedido</label><input value={nomePedido} onChange={e=>setNomePedido(e.target.value)} placeholder="Ex: Neon — Kit Moletom + Corta-vento" style={inp}/></div>
+      <div><label style={{fontSize:12,color:$.mu}}>Cliente</label><input value={cl} onChange={e=>setCl(e.target.value)} placeholder="Nome do cliente" style={inp}/></div>
+    </div>
+
+    <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
+      {skus.map((s,i)=>{const p=products.find(x=>x.id===s.pid);return <button key={s.id} onClick={()=>setActiveSku(i)} style={{padding:"8px 14px",borderRadius:8,fontSize:12,fontWeight:activeSku===i?700:400,cursor:"pointer",border:`1px solid ${activeSku===i?$.bl:$.bd}`,background:activeSku===i?$.bld:$.sf,color:activeSku===i?$.bl:$.mu,fontFamily:"inherit",display:"flex",alignItems:"center",gap:6}}>SKU {i+1}: {p?.name||"?"} ×{s.qty}{skus.length>1&&<span onClick={e=>{e.stopPropagation();rmSku(i);}} style={{marginLeft:4,color:$.rd,fontWeight:700,cursor:"pointer"}}>×</span>}</button>;})}
+      <Bt v="blue" onClick={addSku} style={{fontSize:11,padding:"6px 12px"}}>+ Adicionar SKU</Bt>
+    </div>
+
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
+      <Cd>
+        <div style={{fontSize:14,fontWeight:700,marginBottom:16}}>SKU {activeSku+1}</div>
+        <label style={{fontSize:12,color:$.mu}}>Produto</label><select value={sk.pid} onChange={e=>hSelProd(activeSku,Number(e.target.value))} style={inp}>{products.map(p=><option key={p.id} value={p.id}>{p.emoji} {p.name}</option>)}</select>
+        <label style={{fontSize:12,color:$.mu}}>Descrição/Obs</label><input value={sk.desc} onChange={e=>updSku(activeSku,{desc:e.target.value})} placeholder="Ex: com cordão, arte A..." style={inp}/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><div><label style={{fontSize:12,color:$.mu}}>Quantidade</label><input type="number" value={sk.qty} onChange={e=>updSku(activeSku,{qty:Number(e.target.value),ppOv:null})} style={inp}/></div><div><label style={{fontSize:12,color:$.mu}}>📅 Prazo</label><input type="date" value={prazo} onChange={e=>setPrazo(e.target.value)} style={inp}/></div></div>
+        <ImgUp image={sk.img} onChange={img=>updSku(activeSku,{img})} label="Mock-up (opcional)"/>
+        <div style={{borderTop:`1px solid ${$.bd}`,marginTop:16,paddingTop:16}}><div style={{fontSize:14,fontWeight:700,marginBottom:4}}>Custos da Produção</div><div style={{fontSize:11,color:$.dm,marginBottom:8}}>Fixos = total | Variáveis = por peça | Tecido = fórmula</div><CE costs={sk.costs} onChange={cs=>updSku(activeSku,{costs:cs,ppOv:null})} qty={sk.qty} tecido={sk.tecido} onTecidoChange={t=>updSku(activeSku,{tecido:t,ppOv:null})}/></div>
+        <div style={{borderTop:`1px solid ${$.bd}`,marginTop:12,paddingTop:12,display:"flex",gap:12}}>
+          <div style={{flex:1}}><label style={{fontSize:11,color:$.mu}}>Lucro %</label><input type="number" value={Math.round(c.fLP*100)/100} onChange={e=>updSku(activeSku,{lP:Number(e.target.value),ppOv:null})} style={{...inp,fontFamily:"monospace",marginTop:4}}/></div>
+          <div style={{flex:1}}><label style={{fontSize:11,color:$.mu}}>Imposto %</label><input type="number" value={sk.iP} onChange={e=>updSku(activeSku,{iP:Number(e.target.value),ppOv:null})} style={{...inp,fontFamily:"monospace",marginTop:4}}/></div>
+        </div>
+      </Cd>
+      <div>
+        <Cd style={{marginBottom:16}}><div style={{fontSize:14,fontWeight:700,marginBottom:12}}>Resumo SKU {activeSku+1} — {c.prod?.name}</div>
+          {[["Qtd",`${sk.qty} pç`],["Custo/Pç",fmt(c.cu)],["Custo Prod.",fmt(c.ct)],[`Lucro Bruto ${c.fLP.toFixed(1)}%`,fmt(c.lv2)],[`Imposto ${sk.iP}%`,fmt(c.iv2)]].map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6}}><span style={{color:$.mu}}>{l}</span><span style={{fontFamily:"monospace"}}>{v}</span></div>)}
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,padding:"6px 10px",background:"rgba(76,201,138,0.06)",borderRadius:6}}><span style={{color:$.gn,fontWeight:600}}>Lucro Líquido</span><span style={{fontFamily:"monospace",color:$.gn,fontWeight:700}}>{fmt(c.lucLiq)}</span></div>
+          <div style={{borderTop:`1px solid ${$.bd}`,paddingTop:8,display:"flex",justifyContent:"space-between"}}><span style={{fontWeight:700}}>Total SKU</span><span style={{fontWeight:700,fontSize:16,color:$.gd,fontFamily:"monospace"}}>{fmt(c.pf)}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,marginTop:8,padding:"8px 12px",background:$.s2,borderRadius:8,border:`1px solid ${$.bd}`}}>
+            <span style={{color:$.gn,fontWeight:600}}>Preço/Peça</span>
+            <div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:11,color:$.dm}}>R$</span><input type="number" step="0.01" value={sk.ppOv!==null?sk.ppOv:Math.round(c.pp*100)/100} onChange={e=>updSku(activeSku,{ppOv:Number(e.target.value)})} style={{width:95,background:$.s3,border:`1px solid ${$.bd}`,borderRadius:6,padding:"5px 8px",color:$.gn,fontFamily:"monospace",fontSize:15,fontWeight:700,textAlign:"right",outline:"none"}}/></div>
+          </div>
+        </Cd>
+
+        {skus.length>1&&<Cd style={{marginBottom:16}}><div style={{fontSize:14,fontWeight:700,marginBottom:12}}>Resumo Total ({skus.length} SKUs)</div>
+          {skuCalcs.map((sc,i)=>{const s=skus[i];const p=products.find(x=>x.id===s.pid);return <div key={s.id} style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:5,padding:"5px 8px",background:$.s2,borderRadius:6}}><span style={{color:$.mu}}>{p?.name} ×{s.qty}</span><span style={{fontFamily:"monospace",color:$.gd}}>{fmt(sc.pf)}</span></div>;})}
+          <div style={{borderTop:`1px solid ${$.bd}`,marginTop:8,paddingTop:8}}>
+            {[["Total Peças",`${totalQty} pç`],["Custo Total",fmt(totalCusto)],["Lucro Líquido Total",fmt(totalLucLiq)]].map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:4}}><span style={{color:$.mu}}>{l}</span><span style={{fontFamily:"monospace"}}>{v}</span></div>)}
+            <div style={{display:"flex",justifyContent:"space-between",marginTop:6}}><span style={{fontWeight:700,fontSize:15}}>TOTAL GERAL</span><span style={{fontWeight:700,fontSize:18,color:$.gd,fontFamily:"monospace"}}>{fmt(totalGeral)}</span></div>
+          </div>
+        </Cd>}
+
+        <Bt onClick={hCreate} style={{width:"100%",justifyContent:"center",padding:"12px 20px",fontSize:14}}>Gerar Orçamento & Criar Pedido</Bt>
       </div>
-    </Cd>
-    <div><Cd style={{marginBottom:16}}><div style={{fontSize:14,fontWeight:700,marginBottom:16}}>Resumo</div>
-      {[["Produto",prod?.name],["Qtd",`${qty} pç`],["Prazo",prazo?fD(prazo):"—"],["Custo/Pç",fmt(cu)],["Custo Prod.",fmt(ct)],[`Lucro Bruto ${fLP.toFixed(1)}%`,fmt(lv2)],[`Imposto ${iP}%`,fmt(iv2)]].map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:7}}><span style={{color:$.mu}}>{l}</span><span style={{fontFamily:"monospace"}}>{v}</span></div>)}
-      <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:7,padding:"6px 10px",background:"rgba(76,201,138,0.06)",borderRadius:6}}><span style={{color:$.gn,fontWeight:600}}>Lucro Líquido</span><span style={{fontFamily:"monospace",color:$.gn,fontWeight:700}}>{fmt(lv2-iv2)}</span></div>
-      <div style={{borderTop:`1px solid ${$.bd}`,paddingTop:10,display:"flex",justifyContent:"space-between",marginTop:8}}><span style={{fontWeight:700}}>Total</span><span style={{fontWeight:700,fontSize:18,color:$.gd,fontFamily:"monospace"}}>{fmt(pf)}</span></div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,marginTop:8,padding:"8px 12px",background:$.s2,borderRadius:8,border:`1px solid ${$.bd}`}}>
-        <span style={{color:$.gn,fontWeight:600}}>Preço/Peça</span>
-        <div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:11,color:$.dm}}>R$</span><input type="number" step="0.01" value={ppOv!==null?ppOv:Math.round(pp*100)/100} onChange={e=>setPpOv(Number(e.target.value))} style={{width:95,background:$.s3,border:`1px solid ${$.bd}`,borderRadius:6,padding:"5px 8px",color:$.gn,fontFamily:"monospace",fontSize:15,fontWeight:700,textAlign:"right",outline:"none"}}/></div>
-      </div>
-    </Cd><Bt onClick={hCreate} style={{width:"100%",justifyContent:"center",padding:"12px 20px",fontSize:14}}>Gerar Orçamento & Criar Pedido</Bt></div>
-  </div></div>;
+    </div>
+  </div>;
 }
 
 // ============================================================
@@ -299,13 +343,27 @@ function CalMonth(){
 // ============================================================
 // PEDIDOS
 // ============================================================
+function genPDF(o){
+  const skus=o.skus||[{product:o.product,qty:o.qty,pp:o.total/o.qty,total:o.total,desc:""}];
+  const MN=["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
+  const d=new Date(o.date||Date.now());const dataStr=`São Paulo, ${d.getDate()} de ${MN[d.getMonth()]} de ${d.getFullYear()}`;
+  let html=`<html><head><style>body{font-family:Arial,sans-serif;padding:40px;color:#222;max-width:800px;margin:auto}h1{font-size:14px;margin:0}h2{font-size:18px;text-align:center;margin:30px 0 5px}.sub{text-align:center;font-size:13px;color:#555;margin-bottom:20px}.hdr{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #222;padding-bottom:15px;margin-bottom:20px}.tag{background:#222;color:#fff;padding:4px 12px;font-size:11px;letter-spacing:2px}.info{font-size:11px;color:#555;line-height:1.6}table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#f5f5f5;text-align:left;padding:8px 10px;font-size:11px;border:1px solid #ddd}td{padding:8px 10px;font-size:12px;border:1px solid #ddd}.ftr{margin-top:40px;padding-top:15px;border-top:1px solid #ddd;font-size:10px;color:#777;text-align:center;line-height:1.8}.cond{background:#f9f9f9;padding:15px;border-radius:6px;margin-top:25px;font-size:11px;line-height:1.8}.tot{font-weight:bold;background:#f0f0f0}@media print{body{padding:20px}}</style></head><body>`;
+  html+=`<div class="hdr"><div><h1>SAGI COMÉRCIO E CONFECÇÃO DE VESTUÁRIO LTDA - ME</h1><div class="info">CNPJ: 62.581.777/0001-44</div></div><span class="tag">ORÇAMENTO</span></div>`;
+  html+=`<h2>ORÇAMENTO COMERCIAL — TABELA DE PREÇOS</h2><div class="sub">CLIENTE: ${o.client}</div><div class="sub">${dataStr}</div>`;
+  skus.forEach((s,i)=>{html+=`<h3 style="margin-top:25px;font-size:14px">${i+1}. ${s.product}</h3>`;if(s.desc)html+=`<div style="font-size:11px;color:#666;margin-bottom:8px">${s.desc}</div>`;html+=`<table><tr><th>Item</th><th>Quantidade</th><th>Preço Unitário</th><th>Total</th></tr><tr><td>${s.product}${s.desc?" - "+s.desc:""}</td><td>${s.qty} unidades</td><td>R$ ${(s.pp||0).toFixed(2)}</td><td>R$ ${(s.total||0).toFixed(2)}</td></tr></table>`;});
+  if(skus.length>1){html+=`<table style="margin-top:20px"><tr><th>Resumo</th><th>Qtd Total</th><th></th><th>Total Geral</th></tr><tr class="tot"><td>${skus.length} itens</td><td>${skus.reduce((s,x)=>s+x.qty,0)} un</td><td></td><td>R$ ${(o.total||0).toFixed(2)}</td></tr></table>`;}
+  html+=`<div class="cond"><strong>Condições Comerciais:</strong><br>• Prazo de entrega: ${o.prazo?fD(o.prazo):"A combinar"}<br>• Forma de pagamento: 50% no ato e 50% na entrega<br>• Validade do orçamento: 10 dias</div>`;
+  html+=`<div class="ftr">SAGI COMÉRCIO E CONFECÇÃO DE VESTUÁRIO LTDA - ME<br>CNPJ: 62.581.777/0001-44<br>(11) 99578-8668</div></body></html>`;
+  const w=window.open("","_blank");w.document.write(html);w.document.close();setTimeout(()=>w.print(),500);
+}
+
 function Pedidos({nav}){
   const{orders,advanceStatus,updateOrder,deleteOrder,updatePO,pos}=useApp();const[fl,setFl]=useState("Todos");const[exp,setExp]=useState(null);const[edId,setEdId]=useState(null);
   const flt=fl==="Todos"?orders:orders.filter(o=>o.status===fl);const srt=[...flt].sort((a,b)=>b.id-a.id);
   return <div><h2 style={{fontSize:20,fontWeight:700,marginBottom:20}}>Pedidos</h2><TB tabs={["Todos",...SF]} active={fl} onChange={setFl}/>
-    <div style={{display:"flex",flexDirection:"column",gap:12}}>{srt.map(o=>{const isE=exp===o.id;const isEd=edId===o.id;const cu=sum(o.costs);const ct=cu*o.qty;const ca=SF.indexOf(o.status)<SF.length-1;const po=pos.find(p=>p.pedidoId===o.id);
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>{srt.map(o=>{const isE=exp===o.id;const isEd=edId===o.id;const cu=sum(o.costs);const ct=cu*o.qty;const ca=SF.indexOf(o.status)<SF.length-1;const po=pos.find(p=>p.pedidoId===o.id);const hasSkus=o.skus&&o.skus.length>0;
       return <Cd key={o.id} hover onClick={()=>{if(!isEd)setExp(isE?null:o.id);}} style={{cursor:"pointer"}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}><div style={{display:"flex",alignItems:"center",gap:14}}><span style={{fontWeight:700,fontSize:16}}>#{o.id}</span><div><div style={{fontWeight:700,fontSize:15}}>{o.client}</div><div style={{fontSize:12,color:$.mu}}>{o.product} · {o.qty} pç{o.prazo&&<span style={{marginLeft:6,color:$.or}}>📅 {fD(o.prazo)}</span>}</div></div></div><div style={{display:"flex",alignItems:"center",gap:14}}><span style={{fontFamily:"monospace",fontSize:15,color:$.gd,fontWeight:600}}>{fmt(o.total)}</span><Bd status={o.status}/><span style={{color:$.dm}}>{isE?"▲":"▼"}</span></div></div>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}><div style={{display:"flex",alignItems:"center",gap:14}}><span style={{fontWeight:700,fontSize:16}}>#{o.id}</span><div><div style={{fontWeight:700,fontSize:15}}>{o.nomePedido||o.client}</div><div style={{fontSize:12,color:$.mu}}>{hasSkus?`${o.skus.length} SKUs · ${o.qty} pç`:`${o.product} · ${o.qty} pç`}{o.prazo&&<span style={{marginLeft:6,color:$.or}}>📅 {fD(o.prazo)}</span>}</div></div></div><div style={{display:"flex",alignItems:"center",gap:14}}><span style={{fontFamily:"monospace",fontSize:15,color:$.gd,fontWeight:600}}>{fmt(o.total)}</span><Bd status={o.status}/><span style={{color:$.dm}}>{isE?"▲":"▼"}</span></div></div>
         {isE&&<div style={{marginTop:16,paddingTop:16,borderTop:`1px solid ${$.bd}`}} onClick={e=>e.stopPropagation()}>
           {isEd?<div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:10,marginBottom:12}}>
             <div><label style={{fontSize:11,color:$.mu}}>Cliente</label><input value={o.client} onChange={e=>updateOrder(o.id,{client:e.target.value})} style={{...inp,marginBottom:0,marginTop:4}}/></div>
@@ -320,12 +378,21 @@ function Pedidos({nav}){
           </div>)}</div>
           <Bt v="green" onClick={()=>setEdId(null)} style={{fontSize:12}}>✓ Salvar</Bt><Bt v="muted" onClick={()=>setEdId(null)} style={{fontSize:12,marginLeft:8}}>Fechar</Bt></div>
           :<>
-            <div style={{fontSize:12,fontWeight:700,marginBottom:6}}>Custos por Categoria</div>
+            {hasSkus&&<div style={{marginBottom:12}}><div style={{fontSize:12,fontWeight:700,marginBottom:8}}>SKUs do Pedido</div>
+              {o.skus.map((s,i)=><div key={i} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:8,padding:"8px 10px",background:$.s2,borderRadius:8,marginBottom:4,fontSize:12}}>
+                <div><div style={{fontWeight:600}}>{s.product}</div>{s.desc&&<div style={{fontSize:10,color:$.dm}}>{s.desc}</div>}</div>
+                <div style={{color:$.mu}}>{s.qty} pç</div>
+                <div style={{fontFamily:"monospace"}}>{fmt(s.pp||0)}/pç</div>
+                <div style={{fontFamily:"monospace",color:$.gd,fontWeight:600}}>{fmt(s.total||0)}</div>
+              </div>)}
+              <div style={{display:"flex",justifyContent:"space-between",padding:"8px 10px",background:$.s3,borderRadius:8,marginTop:4,fontSize:13,fontWeight:700}}><span>Total ({o.skus.length} SKUs)</span><span style={{color:$.gd,fontFamily:"monospace"}}>{fmt(o.total)}</span></div>
+            </div>}
+            {!hasSkus&&<><div style={{fontSize:12,fontWeight:700,marginBottom:6}}>Custos por Categoria</div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:10}}>{CK.map(k=>{const perPc=o.costs?.[k]||0;const total=perPc*o.qty;const detTotal=o.costsDetail?.[k];return <div key={k} style={{padding:"5px 8px",background:$.s2,borderRadius:6,fontSize:11}}>
               <div style={{color:$.mu,marginBottom:2}}>{CL[k]}</div>
               <div style={{fontFamily:"monospace",fontWeight:600}}>{fmt(perPc)}/pç</div>
               <div style={{fontFamily:"monospace",color:$.dm,fontSize:10}}>{fmt(detTotal||total)} total</div>
-            </div>})}</div>
+            </div>})}</div></>}
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:12}}>{[["Custo",fmt(ct)],[`Lucro ${o.lucroP}%`,fmt(ct*o.lucroP/100)],["Pç/Un",fmt(o.total/o.qty)],["Total",fmt(o.total)]].map(([l,v])=><div key={l} style={{padding:"6px 8px",background:$.s2,borderRadius:6}}><div style={{fontSize:10,color:$.mu,textTransform:"uppercase"}}>{l}</div><div style={{fontFamily:"monospace",fontSize:13,fontWeight:600}}>{v}</div></div>)}</div>
             <div style={{fontSize:13,fontWeight:700,marginBottom:8}}>Pagamentos</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
@@ -334,7 +401,7 @@ function Pedidos({nav}){
             </div>
             {o.status==="Entregue"&&o.custoReal&&<div style={{padding:8,background:$.s2,borderRadius:8,marginBottom:10,display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:4}}>{CK.map(k=>{const d=(o.costs?.[k]||0)-(o.custoReal?.[k]||0);return <div key={k} style={{fontSize:10,padding:"3px 5px",background:$.sf,borderRadius:4}}><div style={{color:$.mu}}>{CL[k]}</div><div style={{fontFamily:"monospace",color:d>=0?$.gn:$.rd}}>{d>=0?"+":""}{fmt(d)}</div></div>;})}</div>}
             <ImgUp image={o.mockImage} onChange={(img)=>{updateOrder(o.id,{mockImage:img});if(po)updatePO(po.id,{ficha:{...po.ficha,mockFrente:img||""}});}} label={o.mockImage?"Alterar":"📷 Mock-up"}/>
-            <div style={{display:"flex",gap:6,marginTop:12}}>{ca&&<Bt v="green" onClick={()=>advanceStatus(o.id)}>→ {SF[SF.indexOf(o.status)+1]}</Bt>}{po&&<Bt v="blue" onClick={()=>nav("po",po.id)}>{po.id}</Bt>}<Bt v="muted" onClick={()=>setEdId(o.id)}>✏️</Bt><Bt v="red" onClick={()=>{if(confirm(`Deletar #${o.id}?`))deleteOrder(o.id);}}>🗑</Bt></div>
+            <div style={{display:"flex",gap:6,marginTop:12,flexWrap:"wrap"}}><Bt v="gold" onClick={()=>genPDF(o)}>📄 Gerar PDF</Bt>{ca&&<Bt v="green" onClick={()=>advanceStatus(o.id)}>→ {SF[SF.indexOf(o.status)+1]}</Bt>}{po&&<Bt v="blue" onClick={()=>nav("po",po.id)}>{po.id}</Bt>}<Bt v="muted" onClick={()=>setEdId(o.id)}>✏️</Bt><Bt v="red" onClick={()=>{if(confirm(`Deletar #${o.id}?`))deleteOrder(o.id);}}>🗑</Bt></div>
           </>}
         </div>}
       </Cd>;})}</div>
