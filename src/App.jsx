@@ -194,11 +194,24 @@ function Orcamento({nav}){
   const calcSku=(sk)=>{
     const prod=products.find(p=>p.id===sk.pid);
     const ct=calcCustoTotal(sk.costs,sk.tecido,sk.qty);const cu=sk.qty>0?ct/sk.qty:0;
-    let fLP=sk.lP,pf,pp;
-    if(sk.ppOv!==null){pp=sk.ppOv;pf=pp*sk.qty;const ci=ct*(1+sk.iP/100);fLP=ct>0?((pf-ci)/ct)*100:0;}
-    else{const lv=ct*(sk.lP/100);const st=ct+lv;pf=st+st*(sk.iP/100);pp=pf/(sk.qty||1);fLP=sk.lP;}
-    const lv2=ct*(fLP/100);const iv2=(ct+lv2)*(sk.iP/100);
-    return{prod,ct,cu,fLP,pf,pp,lv2,iv2,lucLiq:lv2-iv2};
+    let pp,pf,lucBruto,imposto,lucLiq,fLP=sk.lP;
+    if(sk.ppOv!==null){
+      pp=sk.ppOv;pf=pp*sk.qty;lucBruto=pf-ct;imposto=pf*(sk.iP/100);lucLiq=lucBruto-imposto;fLP=ct>0?(lucLiq/ct)*100:0;
+    } else {
+      // lucro% = lucro líquido desejado sobre o custo
+      // lucLiq = ct * lP/100
+      // imposto = pf * iP/100
+      // pf = ct + lucBruto, lucBruto = lucLiq + imposto
+      // pf = ct + lucLiq + imposto = ct + lucLiq + pf*iP/100
+      // pf(1 - iP/100) = ct + lucLiq
+      // pf = (ct + lucLiq) / (1 - iP/100)
+      lucLiq=ct*(sk.lP/100);
+      pf=(ct+lucLiq)/(1-sk.iP/100);
+      imposto=pf*(sk.iP/100);
+      lucBruto=pf-ct;
+      pp=pf/(sk.qty||1);
+    }
+    return{prod,ct,cu,fLP,pf,pp,lucBruto,imposto,lucLiq};
   };
 
   const skuCalcs=skus.map(calcSku);
@@ -212,11 +225,11 @@ function Orcamento({nav}){
   const hCreate=async()=>{
     if(!cl.trim())return;
     const skusData=skus.map((sk,i)=>{const c=skuCalcs[i];const costsPerPc={};FIXOS.forEach(k=>costsPerPc[k]=sk.qty>0?(sk.costs[k]||0)/sk.qty:0);VARIAVEIS.forEach(k=>costsPerPc[k]=sk.costs[k]||0);costsPerPc.tecido=sk.qty>0?calcTecido(sk.tecido,sk.qty)/sk.qty:0;
-      return{product:c.prod?.name||"Produto",desc:sk.desc,qty:sk.qty,costs:costsPerPc,tecido:sk.tecido,costsTotais:{molde:sk.costs.molde,corte:sk.costs.corte*sk.qty,tecido:calcTecido(sk.tecido,sk.qty),costura:sk.costs.costura*sk.qty,estampas:sk.costs.estampas*sk.qty,transporte:sk.costs.transporte,insumo:sk.costs.insumo},custoTotal:c.ct,lucroP:Math.round(c.fLP*100)/100,impostoP:sk.iP,total:c.pf,pp:Math.round(c.pp*100)/100,lucBruto:c.lv2,imposto:c.iv2,lucLiq:c.lucLiq};
+      return{product:c.prod?.name||"Produto",desc:sk.desc,qty:sk.qty,costs:costsPerPc,tecido:sk.tecido,costsTotais:{molde:sk.costs.molde,corte:sk.costs.corte*sk.qty,tecido:calcTecido(sk.tecido,sk.qty),costura:sk.costs.costura*sk.qty,estampas:sk.costs.estampas*sk.qty,transporte:sk.costs.transporte,insumo:sk.costs.insumo},custoTotal:c.ct,lucroP:Math.round(c.fLP*100)/100,impostoP:sk.iP,total:Math.round(c.pf*100)/100,pp:Math.round(c.pp*100)/100,lucBruto:c.lucBruto,imposto:c.imposto,lucLiq:c.lucLiq};
     });
-    const mainSku=skusData[0];const half=Math.round(totalGeral/2*100)/100;
-    await addOrder({client:cl,productId:skus[0].pid,product:nomePedido||skusData.map(s=>s.product).join(" + "),qty:totalQty,total:totalGeral,status:"Orçamento",date:new Date().toISOString().split("T")[0],prazo,costs:mainSku.costs,costsDetail:{skus:skusData,nomePedido:nomePedido||cl},custoReal:null,lucroP:mainSku.lucroP,impostoP:mainSku.impostoP,mockImage:skus[0].img,parcela1:{valor:half,data:"",pago:false},parcela2:{valor:Math.round((totalGeral-half)*100)/100,data:"",pago:false}});
-    nav("pedidos");
+    const mainSku=skusData[0];const total=Math.round(totalGeral*100)/100;const half=Math.round(total/2*100)/100;
+    const result=await addOrder({client:cl,productId:skus[0].pid,product:nomePedido||skusData.map(s=>s.product).join(" + "),qty:totalQty,total,status:"Orçamento",date:new Date().toISOString().split("T")[0],prazo:prazo||null,costs:mainSku.costs,costsDetail:{skus:skusData,nomePedido:nomePedido||cl},custoReal:null,lucroP:mainSku.lucroP,impostoP:mainSku.impostoP,mockImage:skus[0].img,parcela1:{valor:half,data:"",pago:false},parcela2:{valor:Math.round((total-half)*100)/100,data:"",pago:false}});
+    if(result)nav("pedidos");
   };
 
   const sk=skus[activeSku];const c=skuCalcs[activeSku];if(!sk||!c)return null;
@@ -241,14 +254,14 @@ function Orcamento({nav}){
         <ImgUp image={sk.img} onChange={img=>updSku(activeSku,{img})} label="Mock-up (opcional)"/>
         <div style={{borderTop:`1px solid ${$.bd}`,marginTop:16,paddingTop:16}}><div style={{fontSize:14,fontWeight:700,marginBottom:4}}>Custos da Produção</div><div style={{fontSize:11,color:$.dm,marginBottom:8}}>Fixos = total | Variáveis = por peça | Tecido = fórmula</div><CE costs={sk.costs} onChange={cs=>updSku(activeSku,{costs:cs,ppOv:null})} qty={sk.qty} tecido={sk.tecido} onTecidoChange={t=>updSku(activeSku,{tecido:t,ppOv:null})}/></div>
         <div style={{borderTop:`1px solid ${$.bd}`,marginTop:12,paddingTop:12,display:"flex",gap:12}}>
-          <div style={{flex:1}}><label style={{fontSize:11,color:$.mu}}>Lucro %</label><input type="number" value={Math.round(c.fLP*100)/100} onChange={e=>updSku(activeSku,{lP:Number(e.target.value),ppOv:null})} style={{...inp,fontFamily:"monospace",marginTop:4}}/></div>
+          <div style={{flex:1}}><label style={{fontSize:11,color:$.mu}}>Lucro Líquido %</label><input type="number" value={Math.round(c.fLP*100)/100} onChange={e=>updSku(activeSku,{lP:Number(e.target.value),ppOv:null})} style={{...inp,fontFamily:"monospace",marginTop:4}}/></div>
           <div style={{flex:1}}><label style={{fontSize:11,color:$.mu}}>Imposto %</label><input type="number" value={sk.iP} onChange={e=>updSku(activeSku,{iP:Number(e.target.value),ppOv:null})} style={{...inp,fontFamily:"monospace",marginTop:4}}/></div>
         </div>
       </Cd>
       <div>
         <Cd style={{marginBottom:16}}><div style={{fontSize:14,fontWeight:700,marginBottom:12}}>Resumo SKU {activeSku+1} — {c.prod?.name}</div>
-          {[["Qtd",`${sk.qty} pç`],["Custo/Pç",fmt(c.cu)],["Custo Prod.",fmt(c.ct)],[`Lucro Bruto ${c.fLP.toFixed(1)}%`,fmt(c.lv2)],[`Imposto ${sk.iP}%`,fmt(c.iv2)]].map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6}}><span style={{color:$.mu}}>{l}</span><span style={{fontFamily:"monospace"}}>{v}</span></div>)}
-          <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,padding:"6px 10px",background:"rgba(76,201,138,0.06)",borderRadius:6}}><span style={{color:$.gn,fontWeight:600}}>Lucro Líquido</span><span style={{fontFamily:"monospace",color:$.gn,fontWeight:700}}>{fmt(c.lucLiq)}</span></div>
+          {[["Qtd",`${sk.qty} pç`],["Custo/Pç",fmt(c.cu)],["Custo Prod.",fmt(c.ct)],["Lucro Bruto",fmt(c.lucBruto)],[`Imposto ${sk.iP}%`,fmt(c.imposto)]].map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6}}><span style={{color:$.mu}}>{l}</span><span style={{fontFamily:"monospace"}}>{v}</span></div>)}
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,padding:"6px 10px",background:"rgba(76,201,138,0.06)",borderRadius:6}}><span style={{color:$.gn,fontWeight:600}}>Lucro Líquido ({c.fLP.toFixed(1)}%)</span><span style={{fontFamily:"monospace",color:$.gn,fontWeight:700}}>{fmt(c.lucLiq)}</span></div>
           <div style={{borderTop:`1px solid ${$.bd}`,paddingTop:8,display:"flex",justifyContent:"space-between"}}><span style={{fontWeight:700}}>Total SKU</span><span style={{fontWeight:700,fontSize:16,color:$.gd,fontFamily:"monospace"}}>{fmt(c.pf)}</span></div>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,marginTop:8,padding:"8px 12px",background:$.s2,borderRadius:8,border:`1px solid ${$.bd}`}}>
             <span style={{color:$.gn,fontWeight:600}}>Preço/Peça</span>
@@ -492,13 +505,22 @@ const NAV=[{id:"orcamento",label:"Orçamento",icon:"🧮"},{id:"dashboard",label
 function AppContent(){
   const[page,setPage]=useState("orcamento");const[poId,setPoId]=useState(null);
   const nav=(p,id)=>{if(p==="po"){setPage("po");setPoId(id);}else{setPage(p);if(id)setPoId(id);}};
-  const pages={orcamento:<Orcamento nav={nav}/>,dashboard:<Dashboard/>,pedidos:<Pedidos nav={nav}/>,producao:<Producao nav={nav}/>,po:<PODetail poId={poId} nav={nav}/>,financeiro:<Financeiro/>,produtos:<ProdutosPage/>,leads:<LeadsPage/>};
+  // Render all persistent pages but hide inactive ones to preserve state
   return <div style={{display:"flex",minHeight:"100vh",background:$.bg,color:$.tx,fontFamily:"'DM Sans',sans-serif"}}>
     <div style={{width:200,background:$.sf,borderRight:`1px solid ${$.bd}`,padding:"24px 10px",position:"fixed",top:0,bottom:0,overflowY:"auto",zIndex:50}}>
       <div style={{display:"flex",alignItems:"center",gap:8,padding:"0 6px",marginBottom:28}}><div style={{width:32,height:32,borderRadius:8,background:$.gdd,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>👕</div><div><div style={{fontWeight:900,fontSize:16}}>SALIBA</div><div style={{fontSize:9,letterSpacing:2,textTransform:"uppercase",color:$.mu}}>ERP</div></div></div>
       <div style={{display:"flex",flexDirection:"column",gap:3}}>{NAV.map(i=>{const a=page===i.id||(page==="po"&&i.id==="producao");return <button key={i.id} onClick={()=>nav(i.id)} style={{display:"flex",alignItems:"center",gap:8,padding:"9px 10px",borderRadius:8,background:a?$.s3:"transparent",color:a?$.tx:$.mu,border:"none",fontFamily:"inherit",fontSize:13,fontWeight:a?600:400,cursor:"pointer",textAlign:"left",width:"100%"}}><span style={{fontSize:14}}>{i.icon}</span>{i.label}</button>;})}</div>
     </div>
-    <div style={{marginLeft:200,flex:1,padding:24,minHeight:"100vh"}}>{pages[page]||<Dashboard/>}</div>
+    <div style={{marginLeft:200,flex:1,padding:24,minHeight:"100vh"}}>
+      <div style={{display:page==="orcamento"?"block":"none"}}><Orcamento nav={nav}/></div>
+      <div style={{display:page==="dashboard"?"block":"none"}}><Dashboard/></div>
+      <div style={{display:page==="pedidos"?"block":"none"}}><Pedidos nav={nav}/></div>
+      <div style={{display:page==="producao"?"block":"none"}}><Producao nav={nav}/></div>
+      <div style={{display:page==="financeiro"?"block":"none"}}><Financeiro/></div>
+      <div style={{display:page==="produtos"?"block":"none"}}><ProdutosPage/></div>
+      <div style={{display:page==="leads"?"block":"none"}}><LeadsPage/></div>
+      {page==="po"&&<PODetail poId={poId} nav={nav}/>}
+    </div>
     <Toasts/>
   </div>;
 }
